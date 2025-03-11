@@ -1,9 +1,9 @@
 import requests
 
-url = "http://127.0.0.1:8000/predict/"
+url = "https://master-project-backend.onrender.com/predict/"
 data = {
     "scan_id": 1234,
-    "scan_url": "https://utfs.io/f/KmmwjBRGMj2Fs7MPfRq2mYHBSQbVu635hUAC4d0cMjvEs1ZO",
+    "scan_url": "https://utfs.io/f/KmmwjBRGMj2FR3HMJUdlOZo85GfuU3hMd6XsjmwWeKF4JLbz",
 }
 
 response = requests.post(url, json=data)
