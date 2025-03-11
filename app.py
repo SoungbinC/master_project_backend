@@ -89,9 +89,10 @@ async def process_image_from_url(image_url):
 
 
 # 🔹 API Root - Health Check
-@app.get("/")
+@app.api_route("/", methods=["GET", "HEAD"])
 async def home():
     return {"message": "Eye Disease Classification Model API is Running!"}
+    # 🔹 Health check endpoint
 
 
 # ✅ Prediction Endpoint - Supports Both `GET` and `POST`
