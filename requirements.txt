@@ -1,8 +1,9 @@
 fastapi
-uvicorn
 torch
 torchvision
+torchmetrics
 requests
-pillow
 numpy
 pydantic
+uvicorn
+Pillow
