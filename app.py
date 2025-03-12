@@ -91,6 +91,11 @@ async def process_image_from_url(image_url):
         return None
 
 
+@app.get("/")
+async def root():
+    return {"message": "🚀 Eye Disease Classification API is Running!"}
+
+
 @app.api_route("/predict/", methods=["GET", "POST"])
 async def predict(request: Request, data: ScanInput = None):
     """Handles both GET and POST requests for prediction"""
