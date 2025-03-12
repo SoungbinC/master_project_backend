@@ -2,9 +2,8 @@ from fastapi import FastAPI, HTTPException, Request
 from pydantic import BaseModel
 import requests
 import torch
-import torchvision
+import torchvision.models as models
 import torch.nn as nn
-import torchmetrics
 import numpy as np
 from torchvision import transforms
 from PIL import Image
@@ -12,8 +11,17 @@ from io import BytesIO
 
 app = FastAPI()
 
-# 🔹 Label mappings
-label2id = {"glaucoma": 0, "cataract": 1, "normal": 2, "diabetic_retinopathy": 3}
+# 🔹 Updated Label Mappings with Full Names
+label2id = {
+    "Normal": 0,
+    "Diabetic Retinopathy": 1,
+    "Glaucoma": 2,
+    "Cataract": 3,
+    "AMD (Age-related Macular Degeneration)": 4,
+    "Hypertension": 5,
+    "Myopia": 6,
+    "Other Abnormalities": 7,
+}
 id2label = {v: k for k, v in label2id.items()}  # Reverse mapping
 
 
@@ -23,54 +31,49 @@ class ScanInput(BaseModel):
     scan_url: str
 
 
-# ✅ Define model architecture to match `Trainer`
+# ✅ Define `ResNet50` Model (Matches `best_model.pth`)
 class Net(nn.Module):
     def __init__(self):
         super().__init__()
-        self.base = torchvision.models.resnet18(pretrained=True)
+        self.base = models.resnet50(weights=models.ResNet50_Weights.DEFAULT)
 
-        # 🔹 Freeze all layers except last 15
-        for param in list(self.base.parameters())[:-15]:
+        # 🔹 Freeze early layers (as done in training)
+        for param in list(self.base.parameters())[:-20]:
             param.requires_grad = False
 
-        # 🔹 Keep `block` layer as in Trainer
-        self.block = nn.Sequential(
-            nn.Linear(512, 128),
-            nn.ReLU(),
-            nn.Dropout(0.2),
-            nn.Linear(128, 4),  # 4 classes
+        # 🔹 Modify the final FC layer
+        num_features = self.base.fc.in_features
+        self.base.fc = nn.Sequential(
+            nn.Dropout(0.5),
+            nn.Linear(num_features, 8),  # 8 classes
+            nn.Sigmoid(),  # Sigmoid for multi-label classification
         )
 
-        # 🔹 Do not remove `fc`, just replace it
-        self.base.fc = nn.Sequential()
-
     def forward(self, x):
-        x = self.base(x)  # 🔹 Keep the structure matching `Trainer`
-        x = self.block(x)
-        return x
+        return self.base(x)
 
 
-# 🚀 Load model at startup
+# 🚀 Load `best_model.pth` at startup
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 model = Net().to(device)
 
 try:
-    print("🚀 Loading model...")
-    checkpoint = torch.load("model.pth", map_location=device)
+    print("🚀 Loading best_model.pth...")
+    checkpoint = torch.load("best_model.pth", map_location=device)
     model.load_state_dict(
         checkpoint, strict=False
     )  # 🔹 Use strict=False to handle minor mismatches
     model.eval()
-    print("✅ Model loaded successfully!")
+    print("✅ best_model.pth loaded successfully!")
 except Exception as e:
-    print(f"❌ Error loading model: {e}")
+    print(f"❌ Error loading best_model.pth: {e}")
 
-# 🔹 Image preprocessing
+# 🔹 Image preprocessing (matches training pipeline)
 transform = transforms.Compose(
     [
         transforms.Resize((224, 224)),
         transforms.ToTensor(),
-        transforms.Normalize(mean=[0.5], std=[0.5]),
+        transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
     ]
 )
 
@@ -88,21 +91,10 @@ async def process_image_from_url(image_url):
         return None
 
 
-# 🔹 API Root - Health Check
-@app.api_route("/", methods=["GET", "HEAD"])
-async def home():
-    return {"message": "Eye Disease Classification Model API is Running!"}
-    # 🔹 Health check endpoint
-
-
-# ✅ Prediction Endpoint - Supports Both `GET` and `POST`
 @app.api_route("/predict/", methods=["GET", "POST"])
 async def predict(request: Request, data: ScanInput = None):
     """Handles both GET and POST requests for prediction"""
     try:
-        print(f"📥 Received {request.method} request to /predict/")
-
-        # Handle GET request with URL parameters
         if request.method == "GET":
             scan_id = request.query_params.get("scan_id")
             scan_url = request.query_params.get("scan_url")
@@ -112,7 +104,6 @@ async def predict(request: Request, data: ScanInput = None):
                 )
             scan_id = int(scan_id)
 
-        # Handle POST request with JSON body
         elif request.method == "POST" and data:
             scan_id = data.scan_id
             scan_url = data.scan_url
@@ -127,12 +118,19 @@ async def predict(request: Request, data: ScanInput = None):
         # Model inference
         with torch.no_grad():
             logits = model(image_data)
-            pred_class_id = torch.argmax(logits, axis=1).cpu().item()
+            probabilities = torch.sigmoid(logits).cpu().numpy().flatten()
+            pred_class_id = np.argmax(probabilities)
             pred_class_name = id2label.get(pred_class_id, "Unknown")
+            class_probs = {
+                id2label[i]: round(float(probabilities[i]), 4)
+                for i in range(len(probabilities))
+            }
 
-        print(f"✅ Prediction: {pred_class_name}")
-        return {"scan_id": scan_id, "classification": pred_class_name}
+        return {
+            "scan_id": scan_id,
+            "classification": pred_class_name,
+            "probabilities": class_probs,
+        }
 
     except Exception as e:
-        print(f"❌ Error: {e}")
         return {"error": f"Internal Server Error: {str(e)}"}

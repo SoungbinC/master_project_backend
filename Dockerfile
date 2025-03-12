@@ -4,11 +4,14 @@ FROM python:3.11
 # Set working directory inside the container
 WORKDIR /app
 
-# Copy the project files into the container
-COPY . /app
+# Copy only requirements first (for caching)
+COPY requirements.txt /app/
 
 # Install dependencies
-RUN pip install --no-cache-dir fastapi uvicorn torch torchvision requests pillow numpy pydantic
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy the rest of the project files
+COPY . /app
 
 # Expose port 8000
 EXPOSE 8000
