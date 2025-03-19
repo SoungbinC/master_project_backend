@@ -6,7 +6,7 @@ DEPLOYED_URL = "https://master-project-backend.onrender.com/predict"
 # 🔹 Test Data (Use a valid image URL)
 test_data = {
     "scan_id": 1234,
-    "scan_url": "https://utfs.io/f/KmmwjBRGMj2FE3SJAGEg3rbGHUVA6WMmj9C8Zft4YaI51oik",  # Replace with an actual image URL
+    "scan_url": "https://utfs.io/f/KmmwjBRGMj2FAEZfoI0TVI6UQtm3Gdfv5jbCpln4wOKyFXZ0",  # Replace with an actual image URL
 }
 
 

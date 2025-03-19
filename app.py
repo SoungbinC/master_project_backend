@@ -2,73 +2,71 @@ from fastapi import FastAPI, HTTPException, Request
 from pydantic import BaseModel
 import requests
 import torch
-import torchvision.models as models
 import torch.nn as nn
+import torchvision
 import numpy as np
 from torchvision import transforms
 from PIL import Image
 from io import BytesIO
 
+# 🚀 Initialize FastAPI
 app = FastAPI()
 
-# 🔹 Updated Label Mappings with Full Names
+# 🔹 Label Mappings (4 Classes from `model.pth`)
 label2id = {
-    "Normal": 0,
-    "Diabetic Retinopathy": 1,
-    "Glaucoma": 2,
-    "Cataract": 3,
-    "AMD (Age-related Macular Degeneration)": 4,
-    "Hypertension": 5,
-    "Myopia": 6,
-    "Other Abnormalities": 7,
+    "glaucoma": 0,
+    "cataract": 1,
+    "normal": 2,
+    "diabetic_retinopathy": 3,
 }
 id2label = {v: k for k, v in label2id.items()}  # Reverse mapping
 
 
-# 🔹 Input model for request validation
+# ✅ Input model for request validation
 class ScanInput(BaseModel):
     scan_id: int
     scan_url: str
 
 
-# ✅ Define `ResNet50` Model (Matches `best_model.pth`)
+# ✅ Define `ResNet18` Model for `model.pth`
 class Net(nn.Module):
     def __init__(self):
         super().__init__()
-        self.base = models.resnet50(weights=models.ResNet50_Weights.DEFAULT)
+        self.base = torchvision.models.resnet18(pretrained=True)
 
-        # 🔹 Freeze early layers (as done in training)
-        for param in list(self.base.parameters())[:-20]:
+        # 🔹 Freeze early layers (matches training config)
+        for param in list(self.base.parameters())[:-15]:
             param.requires_grad = False
 
-        # 🔹 Modify the final FC layer
-        num_features = self.base.fc.in_features
-        self.base.fc = nn.Sequential(
-            nn.Dropout(0.5),
-            nn.Linear(num_features, 8),  # 8 classes
-            nn.Sigmoid(),  # Sigmoid for multi-label classification
+        # 🔹 Classification Head (Matches `model.pth`)
+        self.block = nn.Sequential(
+            nn.Linear(512, 128),
+            nn.ReLU(),
+            nn.Dropout(0.2),
+            nn.Linear(128, 4),  # ✅ Corrected: 4 classes
         )
+        self.base.fc = nn.Identity()  # Remove ResNet's FC layer
 
     def forward(self, x):
-        return self.base(x)
+        x = self.base(x)  # Extract features
+        x = self.block(x)  # Pass through custom classifier
+        return x
 
 
-# 🚀 Load `best_model.pth` at startup
+# 🚀 Load `model.pth` at startup
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 model = Net().to(device)
 
 try:
-    print("🚀 Loading best_model.pth...")
-    checkpoint = torch.load("best_model.pth", map_location=device)
-    model.load_state_dict(
-        checkpoint, strict=False
-    )  # 🔹 Use strict=False to handle minor mismatches
+    print("🚀 Loading model.pth...")
+    checkpoint = torch.load("model.pth", map_location=device)
+    model.load_state_dict(checkpoint, strict=False)  # Allow minor mismatches
     model.eval()
-    print("✅ best_model.pth loaded successfully!")
+    print("✅ model.pth loaded successfully!")
 except Exception as e:
-    print(f"❌ Error loading best_model.pth: {e}")
+    print(f"❌ Error loading model.pth: {e}")
 
-# 🔹 Image preprocessing (matches training pipeline)
+# 🔹 Image preprocessing (same as training)
 transform = transforms.Compose(
     [
         transforms.Resize((224, 224)),
@@ -124,7 +122,9 @@ async def predict(request: Request, data: ScanInput = None):
         # Model inference
         with torch.no_grad():
             logits = model(image_data)
-            probabilities = torch.sigmoid(logits).cpu().numpy().flatten()
+            probabilities = (
+                torch.softmax(logits, dim=1).cpu().numpy().flatten()
+            )  # ✅ Softmax
             pred_class_id = np.argmax(probabilities)
             pred_class_name = id2label.get(pred_class_id, "Unknown")
             class_probs = {
